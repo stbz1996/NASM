@@ -1,7 +1,8 @@
-
-<album> 
-        <autor>SABINA Y CIA Nos sobran los motivos</autor> 
+<a id=’name’ name=’name’ href=’#’>Text</a>
+<album>
+        <autor>SABINA Y CIA Nos sobran los motivos</autor>
  <titulo>Joaquín Sabina</titulo>  
-        <formato>MP3</formato> 
+        <formato>MP3</formato>
+		<a id=’name’ name=’name’ href=’#’>Text</a>
  <localizacion>Varios CD5 </localizacion>
 </album>
