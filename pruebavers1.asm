@@ -23,7 +23,7 @@ BuscaMenorQue:	;busca el inicio de la etiqueta (el <)
 	cmp[documento + r15], byte 0x3C ;busca < en el documento
 	je BuscarEspacio
 	cmp[documento + r15], byte 0h
-	je imprimir
+	je RecorrerBufferEtiqueta
 	inc r15
 	jmp BuscaMenorQue
 
@@ -60,11 +60,69 @@ BuscarEspacio:	;busca el final de la etiqueta
 
 	.retornar:
 		pop rcx
-		;mov [bEtiqueta + r14], byte 3Eh
-		;inc r14
+		mov [bEtiqueta + r14], byte 10
+		inc r14
 		cmp r15, rbp
-		jb	BuscaMenorQue
+		jb BuscaMenorQue
 
+
+
+
+
+RecorrerBufferEtiqueta:
+	; este procedimiento toma cada tag y lo compara con el tag anterior
+	; para colocar los contadores adeuados y validar o mostrar el error
+	; registros contadores
+		; - r8
+		; - r9
+		; - r10
+		; - r11
+	push r8
+	push r9
+	push r10
+	push r11	
+	push rax
+
+	mov r8, 0 ;r8 apunta al inicio del buffer
+	mov r9, 1 ; r9 va a apuntar  la primera letra de cada tag de apertura
+	mov r10, 2; solo inicio del r10
+	xor rax, rax
+
+	.BuscarBackSlash:
+		cmp [bEtiqueta + r10], byte 2fh 
+		jne .repetir	
+		lea r9, [r10 - 2]	
+		jmp .BuscarTagAnterior
+
+	.repetir:
+		inc r10
+		jmp .BuscarBackSlash
+	
+	.BuscarTagAnterior:
+		cmp [bEtiqueta + r9], byte 3ch 
+		je .ValidarTags
+		dec r9
+		jmp .BuscarTagAnterior
+
+	.ValidarTags:
+		; poner los < en 1 para conteo
+		mov byte [bEtiqueta + r9], 31h
+		mov byte [bEtiqueta + r10 - 1], 31h
+	
+	.cicloValidarTags:
+		; incrementamos para tener la primer letra de cada tag
+		inc r9
+		inc r10
+
+		mov al, byte [bEtiqueta + r9]
+		cmp al, byte [bEtiqueta + r10]
+		jne imprimir
+		;si son iguales
+			; ponga ceros o unos
+		mov byte [bEtiqueta + r9],30h
+		mov byte [bEtiqueta + r10],30h
+		jmp .cicloValidarTags
+		
 ;*****************************************************************************************************
 imprimir:
 	mov rax, 1
