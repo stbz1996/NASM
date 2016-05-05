@@ -1,0 +1,21 @@
+%macro readFile 2
+	mov rax, 0
+	mov rdi, 0
+	mov rsi, %1
+	mov rdx, %2
+	syscall
+%endmacro
+
+%macro print 2
+	mov rax, 1	; write syscall
+	mov rdi, 1   	; standard output, file descriptor
+	mov rsi, %1     ; address
+	mov rdx, %2     ; length
+	syscall         ; call write syscall
+%endmacro
+
+%macro exit 0
+	mov rax, 60	; write syscall
+	mov rdi, 0   	; Exit_Success
+	syscall         ; call write syscall
+%endmacro
