@@ -7,11 +7,15 @@
 %endmacro
 
 %macro print 2
+	push r11
+	push r12
 	mov rax, 1	; write syscall
 	mov rdi, 1   	; standard output, file descriptor
 	mov rsi, %1     ; address
 	mov rdx, %2     ; length
 	syscall         ; call write syscall
+	pop r12
+	pop r11
 %endmacro
 
 %macro exit 0

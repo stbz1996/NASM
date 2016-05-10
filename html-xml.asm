@@ -1,19 +1,19 @@
-						;****************************************************
-						;		INSTITUTO TECNOLÓGICO DE COSTA RICA			*
-						;													*
-						;		Arquitectura de Computadores - Grupo 40		*
-						;													*
-						;		Profesor: Erick Hernández B.				*
-						;                                                   *
-						;		Primer Proyecto NASM: Verificador HTML/XML	*
-						;													*
-						;		Estudiantes: Steven 	Bonilla				*
-						;                    Mauricio 	Castillo V.			*
-						;                    Randy 		Morales G.			*
-						;													*
-						;		Semestre I - 2016							*
-						;													*
-						;****************************************************
+;****************************************************
+;		INSTITUTO TECNOLÓGICO DE COSTA RICA			*
+;													*
+;		Arquitectura de Computadores - Grupo 40		*
+;													*
+;		Profesor: Erick Hernández B.				*
+;                                                   *
+;		Primer Proyecto NASM: Verificador HTML/XML	*
+;													*
+;		Estudiantes: Steven 	Bonilla				*
+;                    Mauricio 	Castillo V.			*
+;                    Randy 		Morales G.			*
+;													*
+;		Semestre I - 2016							*
+;													*
+;****************************************************
 
 %include "macros.mac"
 ; el archivo macros incluye: readFile, print, exit
@@ -21,29 +21,34 @@
 
 
 ;*****************************	INFORMACION DEL USO DE REGISTROS Y MEMORIA	*********************************
-;
-;	R15 = Para recorrer el archivo el busca de las etiquetas
-;	R14 = Para recorrer el buffer BUFFER_TAGS
-;	R9  = Para encontrar los tags de apertura
-;	R10 = Para encontrar los tags de cierre
-;	RCX = Para almacenar valores que seran situados en BUFFER_TAGS
-;	RAX = Para almacenar valores que seran comparados en ValidarTags
+;	
+;	RAX (AL) = Para almacenar valores que seran comparados y movidos entre memoria y registros.
+;	RBX = FILA
+;	RCX = COLUMNA
+
+;	R8  = Indice para el BUFFER_POS
+;	R9  = Para encontrar los tags de apertura | Imprimir fila/columna en la parte de los errores
+;	R10 = Para encontrar los tags de cierre	  | Imprimir fila/columna en la parte de los errores
 ;	R11 = Guarda temporalmente la posicion que hace referencia el r9
 ;	R12 = Guarda temporalmente la posicion que hace referencia el r10
-;	RBX = Indice en el buffer de los errores (partido con BL Y BX)
+;	R13 = Para recorrer el buffer BUFFER_ERRORES
+;	R14 = Para recorrer el buffer BUFFER_TAGS
+;	R15 = Para recorrer el archivo en busca de las etiquetas
+
 ;	BUFFER_TAGS = Almacena todos los tags que se encuentren en el archivo
 ;	BUFFER_ERRORES = Almacena los tags que no tengan apertura o cierre
+;	BUFFER_POS = Guarda las posiciones de los tags, y se utiliza para la info de error con fila/columna
 ;
 ;************************************************************************************************************
 
 ;SECCION DE DATOS SIN INICIALIZAR
 section .bss
-	bufflen 			equ 4096
-	documento 			resb bufflen
+	DOC_LEN 			equ 4096
+	documento 			resb DOC_LEN
 
-	AUXBUFF_LEN 		equ 1024
-	BUFFER_TAGS 		resb AUXBUFF_LEN
-	BUFFER_ERRORES 		resb AUXBUFF_LEN
+	BUFFER_LEN 			equ 1024
+	BUFFER_TAGS 		resb BUFFER_LEN
+	BUFFER_ERRORES 		resb BUFFER_LEN
 
 ;SECCION DE DATOS INICIALIZADOS
 section .data
@@ -51,29 +56,38 @@ section .data
 	msjInfo: 			db "Los siguientes TAGS son los errores: ", 10
 	msjInfoLen 			equ $-msjInfo
 
+	msjErrorFila: 		db " ERROR EN LA FILA: "
+	msjErrorFilaLen		equ $-msjErrorFila
+
+	msjErrorCol:		db " Y LA COLUMNA: "
+	msjErrorColLen		equ $-msjErrorCol
+
 	lines: 				db 10,10
 	lineslen 			equ $-lines
+
+	FILA_COLUMNA_LEN 	equ 4
+	FILA: 				db "0000"
+	COLUMNA: 			db "0000"
 
 ;SECCION QUE CONTIENE EL CODIGO
 section .text
 global _start 	;ETIQUETA GLOBAL QUE NECESITA EL LINKER COMO PUNTO DE ENTRADA
 
 _start:
-	readFile documento, bufflen   	;macro que lee el documento
+	readFile documento, DOC_LEN   	;macro que lee el documento
 	cmp rax, 0						;si el archivo esta vacio, sale
 	je salir
 
-	xor r15, r15	;indice para recorrer el archivo
-	xor r14, r14	;indice para recorrer el buffer BUFFER_TAGS
-	xor rbx, rbx	;indice en BUFFER_ERRORES
-
 	xor r9, r9		;indice para buscar el < del tag anterior al /
-	xor r11, r11	;respaldo del r9
 	xor r10, r10	;indice para buscar los /
+	xor r11, r11	;respaldo del r9
 	xor r12, r12	;respaldo del r10
+	xor r13, r13	;indice en BUFFER_ERRORES
+	xor r14, r14	;indice para recorrer el buffer BUFFER_TAGS	
+	xor r15, r15	;indice para recorrer el archivo	
 
 	call ObtenerTags 		;Guarda todo los tags del archivo en el buffer BUFFER_TAGS
-
+	;print BUFFER_TAGS, r14
 	jmp BuscarBackSlash 	;Busca el caracter / que indica un tag de cierre (Aqui se inicia toda la verificacion)
 		
 ;***************************************	PROCEDIMIENTOS	*****************************************
@@ -92,15 +106,19 @@ ObtenerTags:
 
 		;busca el final del tag
 		.BuscarEspacio:
-			;guardar toda el tag
+
+			;guardar todo el tag
 			.buscarEspacioYGuardar:
+				cmp[documento + r15], byte 0H	;si se llega al final del archivo, salir
+				je .salirObtenerTags
+
 				cmp[documento + r15], byte 20H	;cuando encuentra un espacio, es el fin del nombre del tag
 				;hacerMatch = encontrar el caracter > que cierra el tag
 				je .hacerMatch
 
 				;si no es igual a "espacio", pues se esta guardando el nombre del tag
-				mov cl, byte[documento + r15]
-				mov byte[BUFFER_TAGS + r14], cl
+				mov al, byte[documento + r15]
+				mov byte[BUFFER_TAGS + r14], al
 				inc r14
 				inc r15
 				cmp byte[documento + r15-1], 3EH 	;esto se agrega porque hace un inc extra, y se ocupa verificar si ya esta en ">"
@@ -120,8 +138,8 @@ ObtenerTags:
 
 			;agrega el > al buffer y busca otro tag
 			.salvarCaracter:
-				mov cl, byte[documento + r15]
-				mov byte[BUFFER_TAGS + r14], cl
+				mov al, byte[documento + r15]
+				mov byte[BUFFER_TAGS + r14], al
 				inc r14
 				inc r15
 				jmp .retornar
@@ -142,8 +160,12 @@ ObtenerTags:
 ;Su funcion es encontrar el caracter / que indica un tag de cierre
 BuscarBackSlash:
 	.loopBuscarBackSlash:
+		cmp[BUFFER_TAGS + r10], byte 0H	;si se llega al final del archivo, salir
+		je RevisarBufferErrores
+
 		cmp r10, r14		;si buscando el / llega al final del doc, es decir, no encontro mas tags de cierre
 		je RevisarBufferErrores
+
 		cmp byte[BUFFER_TAGS + r10], 2FH ;/
 		jne .incR10
 
@@ -179,14 +201,17 @@ BuscarTagAnterior:
 
 			.loopErrorTagCierre:
 
+				cmp r10, r14		;compara si llega al final
+				ja IndicarErrores
+
 				cmp byte[BUFFER_TAGS + r10], 10			;compara si llega al separador "enter"
 				je .salirErrorTagCierre
 
-				mov cl, byte[BUFFER_TAGS + r10]			;sino, copia el caracter al BUFFER_ERRORES
-				mov byte[BUFFER_ERRORES + rbx], cl
-				inc rbx
+				;mov al, byte[BUFFER_TAGS + r10]			;sino, copia el caracter al BUFFER_ERRORES
+				;mov byte[BUFFER_ERRORES + r13], al
+				;inc r13
 
-				mov byte[BUFFER_TAGS + r10], 30H		;agregamos un 0 porque ocupamos omitir lo que ya dio ERROR
+				;mov byte[BUFFER_TAGS + r10], 30H		;agregamos un 0 porque ocupamos omitir lo que ya dio ERROR
 				inc r10
 				jmp .loopErrorTagCierre
 
@@ -199,8 +224,8 @@ BuscarTagAnterior:
 ;Su funcion es validar los nombres del tag de apertura y del tag de cierre
 ValidarTags:
 	.cicloValidarTags:
-		mov cl, byte[BUFFER_TAGS + r9]		;se comparan secuencialmente los caracteres
-		cmp cl, byte[BUFFER_TAGS + r10]
+		mov al, byte[BUFFER_TAGS + r9]		;se comparan secuencialmente los caracteres
+		cmp al, byte[BUFFER_TAGS + r10]
 		je .continuarValidarTags
 
 		;en caso de no ser iguales, se recuperan las posiciones de los indices r9 y r10
@@ -228,6 +253,12 @@ ValidarTags:
 			mov r10, r12
 			dec r10
 			mov r9, r11			;recuperar valores de los indices
+
+			mov byte[BUFFER_TAGS + r10], 30H
+			mov byte[BUFFER_TAGS + r9], 30H		;poner 1 tanto al < del tag de apertura como al de cierre
+
+			inc r9
+			inc r10
 
 			.cicloRemoverTagsBuenos:
 
@@ -260,42 +291,184 @@ ValidarTags:
 				;(el / que no tiene el tag de apertura)
 
 				cmp r10, r14	;se compara si sobrepaso el final del BUFFER_TAGS, sino, a buscar otro /
-				jae salir
+				jae MostrarInformacion
 
 				inc r10
 				jmp BuscarBackSlash.loopBuscarBackSlash
 
 ;Su funcion es agregar al BUFFER_ERRORES los tags de apertura que no tenian cierre
 RevisarBufferErrores:
-	xor r8, r8		;el indice en el BUFFER_TAGS
+	mov r14, -1		; resetear el indice en el BUFFER_TAGS
 
 	.cicloRevisarBufferErrores:
-		cmp byte[BUFFER_TAGS + r8], 30H		;si no encuentra algo seteado, es porque quedaron errores de tags de apertura
-		jne .agregarABufferErrores			;entonces lo agregamos al BUFFER_ERRORES
+		inc r14
+		cmp byte[BUFFER_TAGS + r14], 0H		;comparar si ya se llego al final del BUFFER_TAGS
+		je IndicarErrores
 
-		inc r8
-		cmp r8, r14							;comparar si ya se llego al final del BUFFER_TAGS
-		je MostrarInformacion
+		cmp byte[BUFFER_TAGS + r14], 30H	;si no encuentra algo seteado, es porque quedaron errores de tags de apertura
+		je .cicloRevisarBufferErrores			;entonces lo agregamos al BUFFER_ERRORES
 
-		jmp .cicloRevisarBufferErrores
+		cmp byte[BUFFER_TAGS + r14], 31H	;el caracter 1 en este caso nos sirve para la cantidad de tags que hay en total
+		je .cicloRevisarBufferErrores		;entonces no lo agregamos al BUFFER_ERRORES
+
+		;jmp .agregarABufferErrores
 
 	.agregarABufferErrores:
-		mov cl, byte[BUFFER_TAGS + r8]
-		mov byte[BUFFER_ERRORES + rbx], cl
-		inc r8
-		inc rbx
+		mov al, byte[BUFFER_TAGS + r14]
+		mov byte[BUFFER_ERRORES + r13], al
+		inc r14
+		inc r13
 
-		cmp byte[BUFFER_TAGS + r8], 30H
-		je .cicloRevisarBufferErrores
+		cmp byte[BUFFER_TAGS + r14], 30H
+		je .cicloRevisarBufferErrores		
+
+		cmp byte[BUFFER_TAGS + r14], 0H		;comparar si ya se llego al final del BUFFER_TAGS
+		je IndicarErrores
 
 		jmp .agregarABufferErrores
 
+
+;Su funcion es la de mostrar los errores en pantalla, con el formato fila / columna
+IndicarErrores:
+	mov byte[BUFFER_ERRORES + r13], 10
+	inc r13
+	mov r8, r13		;respaldo largo BUFFER_ERRORES
+	xor r13, r13 	;resetear el indice del BUFFER_ERRORES
+	xor r15, r15 	;resetear el indice del documento
+	xor rax, rax
+
+	xor r9, r9 		;FILA
+	xor r10, r10 	;COLUMNA
+
+	xor r11, r11 	;Respaldo FILA
+	xor r12, r12	;Respaldo COLUMNA
+
+	xor rbp, rbp 	;Respaldo de R13
+
+	.cicloIndicarErrores:
+		;se guardan los valores para la impresion del ERROR
+		mov r11, r9
+		mov r12, r10
+		mov rbp, r13
+		cmp byte[documento + r15], 3CH 		;con <
+		je .compararContenidoTag
+
+		cmp byte[documento + r15], 10 		;con el enter
+		je .modificarFC 					;FC Fila Columna
+
+		cmp byte[documento + r15], 0H
+		je MostrarInformacion
+
+		inc r15
+		inc r10
+		jmp .cicloIndicarErrores
+
+	.modificarFC:
+		inc r9				;FILA + 1
+		xor r10, r10 		;COLUMNA = 0
+		inc r15
+
+		jmp .cicloIndicarErrores
+
+	.compararContenidoTag:
+
+		cmp byte[documento + r15], 0H
+		je .imprimirError
+
+		cmp byte[BUFFER_ERRORES + r13], 0H
+		je .imprimirError
+
+		cmp byte[documento + r15], 3EH 		; con >
+		je .imprimirError
+
+		mov al, byte[BUFFER_ERRORES + r13]
+		cmp al, byte[documento + r15]
+
+		jne .salirCompararContenidoTag
+
+		inc r13
+		inc r15
+		inc r10 	;COLUMNA
+
+		jmp .compararContenidoTag
+
+		.salirCompararContenidoTag:
+			inc r15
+			inc r10
+			mov r13, rbp
+			jmp .cicloIndicarErrores
+
+
+	.imprimirError:
+		print lines, lineslen
+		print msjErrorFila, msjErrorFilaLen
+
+		mov rax, r11
+		mov rsi, FILA
+		call itoa
+		print FILA, FILA_COLUMNA_LEN
+
+		print msjErrorCol, msjErrorColLen
+		mov rax, r12
+		mov rsi, COLUMNA
+		call itoa
+		print COLUMNA, FILA_COLUMNA_LEN
+
+
+		cmp byte[documento + r15], 0H
+		je MostrarInformacion
+
+		add r13, 2
+		inc r15
+		inc r10
+
+		call LimpiarBuffer
+		jmp .cicloIndicarErrores
+
 MostrarInformacion:
 	print lines, lineslen
-	print BUFFER_TAGS, r14
-	print lines, lineslen
 	print msjInfo, msjInfoLen
-	print BUFFER_ERRORES, rbx
+	print BUFFER_ERRORES, r8
 
 salir:
 	exit
+
+itoa:
+	push rdx
+	push rcx
+	push rax
+
+	lea rcx, [FILA_COLUMNA_LEN - 1]
+	mov rbx, 10
+
+	cmp rax, 0
+	je .salirItoa
+
+	.cicloItoa:
+		xor rdx, rdx    				; se limpia porque se ocupa en la division RDX:RAX
+		div rbx		   					; el cociente se queda en el rax y el residuo en el RDX
+		add dl, '0'     				; se convierte el residuo a ascii
+		mov [rsi + rcx], dl   			; mover el caracter a la direccion donde esta el buffer
+		dec rcx        					; Decrementa el apuntador
+
+		cmp rax, 0   					; verifica que el rax es cero. Si lo es la bandera ZF se modifica	
+		jnz .cicloItoa       			; Salta si bandera del ZF se modifica! si rax!=0
+
+	.salirItoa:
+	pop rax
+	pop rcx
+	pop rdx
+	ret
+
+LimpiarBuffer:
+	push rcx
+	xor rcx, rcx
+	.cicloLimpiarBuffer:
+		mov byte[FILA + rcx], '0'
+		mov byte[COLUMNA + rcx], '0'
+		inc rcx
+		cmp rcx, 4
+		jb .cicloLimpiarBuffer
+
+	pop rcx
+	ret
